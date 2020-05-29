@@ -19,15 +19,14 @@ function urlForUser(emailAddress) {
   return urlForList() + md5(emailAddress);
 }
 
-function updateSubscription(emailAddress) {
+function updateSubscription(emailAddress, firstName, lastName) {
   return new Promise(function(resolve, reject) {
     request.patch(urlForUser(emailAddress))
       .auth(USERNAME, API_KEY)
-      .send({ status: STATUS })
+      .send({ email_address: emailAddress, status: STATUS, merge_fields: { FNAME: firstName, LNAME: lastName } })
       .end(function(err, res) {
         if (err) {
-          console.log('ERROR', err);
-          reject({ status: err.status, message: err.response.text });
+          reject({ statusCode: err.status, body: err.response.text });
         } else {
           resolve(res.body);
         }
@@ -35,41 +34,62 @@ function updateSubscription(emailAddress) {
   });
 }
 
-function createSubscription(emailAddress) {
+function createSubscription(emailAddress, firstName, lastName) {
   return new Promise(function(resolve, reject) {
     request.post(urlForList())
       .auth(USERNAME, API_KEY)
-      .send({ email_address: emailAddress, status: STATUS })
+      .send({ email_address: emailAddress, status: STATUS, merge_fields: { FNAME: firstName, LNAME: lastName } })
       .end(function(err, res) {
         if (err) {
-          console.log('ERROR', err);
-          reject({ status: err.status, message: err.response.text });
+          reject({ statusCode: err.status, body: err.response.text });
         } else {
-          resolve(res.body);
+          resolve({statusCode: res.status, body: 'Successful Create'});
         }
       });
   });
 }
 
 exports.handler = function(event, context) {
+
+  if ( event.body ) {
+    event = JSON.parse(event.body);
+  }
+
   var emailAddress = event.email;
+  var firstName    = event.first_name || "";
+  var lastName     = event.last_name  || "";
+
+  console.log("Vars: " + emailAddress + "|" + firstName + "|" + lastName);
+
   function create() {
-    createSubscription(emailAddress)
+    var res = createSubscription(emailAddress, firstName, lastName)
       .then(function(responseBody) {
+        console.log("Resp Body: ", responseBody);
         context.succeed(responseBody);
       })
       .catch(function(err) {
-        context.fail(new Error(err));
+        return err;
       });
+
+    return res;
   }
 
-  updateSubscription(emailAddress)
+  var res = updateSubscription(emailAddress, firstName, lastName)
     .then(function(responseBody) {
-      context.succeed(responseBody);
+      context.succeed({statusCode: 200, body: 'Successful Update'});
     })
     .catch(function(err) {
-      if (err.status === 404) {
+      console.log("Error: ", err);
+      if (err.status === 404 || err.statusCode === 404) {
+        console.log("New subscriber!");
         create();
+      } else {
+
+        if(!err.statusCode) {
+          err = {statusCode: 500, body: err.message};
+        };
+        
+        return err;
       }
     });
 };
